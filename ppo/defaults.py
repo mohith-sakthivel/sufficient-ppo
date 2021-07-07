@@ -1,4 +1,4 @@
-from mre.utils import AttrDict, ProgressSchedule
+from ppo.utils import AttrDict, ProgressSchedule
 
 
 def default_args_template() -> AttrDict:

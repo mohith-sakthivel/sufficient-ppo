@@ -17,7 +17,7 @@ from stable_baselines3.common.type_aliases import GymEnv, MaybeCallback, Schedul
 from stable_baselines3.common.utils import explained_variance, get_schedule_fn
 from stable_baselines3.common.utils import safe_mean
 
-from mre.base_class import BaseAlgorithm
+from ppo.base_class import BaseAlgorithm
 
 
 def constant_fn(val):
@@ -244,7 +244,7 @@ class PPO(BaseAlgorithm):
         with torch.no_grad():
             # Compute value for the last timestep
             obs_tensor = torch.as_tensor(new_obs).to(self.device)
-            _, values, _ = self.policy.forward(obs_tensor)
+            _, values, _ = self.policy.forward(obs_tensor, pi=False, vf=True)
 
         rollout_buffer.compute_returns_and_advantage(
             last_values=values, dones=dones)
@@ -304,16 +304,17 @@ class PPO(BaseAlgorithm):
                     (torch.abs(ratio - 1) > clip_range).float()).item()
                 clip_fractions.append(clip_fraction)
 
-                if self.clip_range_vf is None:
-                    # No clipping
-                    values_pred = values
-                else:
+                # Value loss using the TD(gae_lambda) target
+                value_loss = F.mse_loss(values, rollout_data.returns, reduction='none')
+                if self.clip_range_vf is not None:
                     # Clip the different between old and new value
                     # NOTE: this depends on the reward scaling
                     values_pred = rollout_data.old_values + torch.clamp(
                         values - rollout_data.old_values, -clip_range_vf, clip_range_vf)
-                # Value loss using the TD(gae_lambda) target
-                value_loss = F.mse_loss(rollout_data.returns, values_pred)
+                    value_loss_clipped = F.mse_loss(values_pred, rollout_data.returns, reduction='none')
+                    value_loss = torch.maximum(value_loss, value_loss_clipped)
+
+                value_loss = 0.5 * value_loss.mean()
                 value_losses.append(value_loss.item())
 
                 # Entropy loss favor exploration
@@ -391,17 +392,16 @@ class PPO(BaseAlgorithm):
         """
         Parameters
         -----------
-        total_timesteps [int]       - Total timesteps
-
-        callback [MaybeCallback]    - Can be a callable, callback, list of callbacks or None. \
-                                      Called at every step with state of the algorithm.
-        log_interval [int]          - Frequency at which to log
-        eval_env [GymEnv, None]     - Environment for evaluation (optional)
-        eval_freq [int]             - Frequency of evaluation (optional)
-        n_eval_episodes [int]       - Number of evaluation episodes
-        tb_log_name                 - Tensorboard logger name
-        eval_log_path [str, None]   - Evaluation logging path (optional)
-        reset_num_timesteps [bool]  - Whether to reset or not the ``num_timesteps`` attribute
+        total_timesteps      - Total timesteps
+        callback             - Can be a callable, callback, list of callbacks or None. \
+                               Called at every step with state of the algorithm.
+        log_interval         - Frequency at which to log
+        eval_env             - Environment for evaluation (optional)
+        eval_freq            - Frequency of evaluation (optional)
+        n_eval_episodes      - Number of evaluation episodes
+        tb_log_name          - Tensorboard logger name
+        eval_log_path        - Evaluation logging path (optional)
+        reset_num_timesteps  - Whether to reset or not the ``num_timesteps`` attribute
         """
 
         iteration = 0
@@ -416,7 +416,8 @@ class PPO(BaseAlgorithm):
                                                       tb_log_name=tb_log_name)
 
         callback.on_training_start(locals(), globals())
-
+        last_log_timestep = self.num_timesteps
+        last_log_time = time.time()
         while self.num_timesteps < total_timesteps:
 
             continue_training = self.collect_rollouts(
@@ -428,10 +429,12 @@ class PPO(BaseAlgorithm):
             iteration += 1
             self._update_remain_progress(
                 self.num_timesteps, total_timesteps)
+            
+            self.train()
 
             # Display training infos
             if log_interval is not None and iteration % log_interval == 0:
-                fps = int(self.num_timesteps / (time.time() - self.start_time))
+                fps = int((self.num_timesteps - last_log_timestep)/ (time.time() - last_log_time))
                 logger.record("time/iterations", iteration,
                               exclude="tensorboard")
                 if len(self.ep_info_buffer) > 0 and len(self.ep_info_buffer[0]) > 0:
@@ -446,7 +449,6 @@ class PPO(BaseAlgorithm):
                               self.num_timesteps, exclude="tensorboard")
                 logger.dump(step=self.num_timesteps)
 
-            self.train()
         callback.on_training_end()
 
     def _get_torch_save_params(self):

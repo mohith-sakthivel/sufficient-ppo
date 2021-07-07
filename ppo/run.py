@@ -4,10 +4,10 @@ import time
 import pathlib
 import torch
 
-from mre.ppo import PPO
-from mre.policy import ActorCriticPolicy
-from mre.wrappers import atari_wrapper
-from mre.defaults import get_env_defaults
+from ppo.ppo import PPO
+from ppo.policy import ActorCriticPolicy
+from ppo.wrappers import atari_wrapper
+from ppo.defaults import get_env_defaults
 
 from stable_baselines3.common.vec_env import SubprocVecEnv, DummyVecEnv, VecFrameStack
 from stable_baselines3.common.env_util import make_vec_env
@@ -22,7 +22,7 @@ def start_experiment(args):
     logdir = pathlib.Path(args.logdir) / path_str
     os.makedirs(logdir)
     # save experiment args
-    with open(logdir.joinpath('params.yaml'), 'w') as out:
+    with open(logdir.joinpath('params.yml'), 'w') as out:
         yaml.dump(args.__getstate__(), out, indent=4)
     # setup environments
     env = make_env(args.env_name, args.workers, args.seed, **args.env)
@@ -62,13 +62,15 @@ def start_experiment(args):
     model.save(logdir / args.exp_name)
 
     del model  # remove to demonstrate saving and loading
-    model = PPO.load(logdir / args.exp_name)
+    env = make_env(args.env_name, args.workers, args.seed, **args.env)
+    model = PPO.load(path=logdir / args.exp_name, env = env)
 
     obs = env.reset()
     for _ in range(1):
         action, _states = model.predict(obs)
         obs, rewards, dones, info = env.step(action)
         env.render()
+    print('Done....')
 
 
 def make_env(env_name, n_envs, seed=None, env_type=None,
@@ -77,6 +79,7 @@ def make_env(env_name, n_envs, seed=None, env_type=None,
     """
     Make environment based with necessary wrappers
     """
+    wrapper_kwargs = wrapper_kwargs.copy()
     vec_env_cls = (SubprocVecEnv if (multi_process and n_envs > 1)
                    else DummyVecEnv)
     frame_stack = wrapper_kwargs.pop('frame_stack', None)
@@ -98,10 +101,9 @@ def make_env(env_name, n_envs, seed=None, env_type=None,
     return env
 
 
-def get_default_args(env_type='atari'):
+def get_default_args(env_type):
     args = get_env_defaults(env_type)
     args.seed = 0
-    args.env_name = 'PongNoFrameskip-v4'
     args.log_interval = 1
     # Environment specific args
     args.env.multi_process = True
@@ -115,15 +117,18 @@ if __name__ == '__main__':
 
     parser = argparse.ArgumentParser(
         formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-    # experimetn args
+    # experiment args
     parser.add_argument('--exp_name', type=str, default='ppo')
     parser.add_argument('--logdir', default='logs')
     parser.add_argument('--timesteps', type=int, default=1e7)
     parser.add_argument('--seed', help='RNG seed', type=int, default=0)
+    # environment args
+    parser.add_argument('--env_type', type=str, default='atari')
+    parser.add_argument('--env_name', type=str, default='BreakoutNoFrameskip-v4')
 
     cli_args = parser.parse_args()
     algo_args = []
-    args = get_default_args()
+    args = get_default_args(cli_args.env_type)
 
     for key, val in cli_args.__dict__.items():
         if val is not None:

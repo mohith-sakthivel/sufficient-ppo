@@ -1,14 +1,9 @@
-# Mutli-Resolution Exploration
+# Sufficient PPO
 
-## Environment Setup
-```
-conda create -n mre python=3.8.*
-conda install pytorch==1.7.1 torchvision==0.8.2 cudatoolkit=11.0 -c pytorch
-conda install -c anaconda pyyaml
+This repo contains a refactored version of PPO from stable-baselines3
 
-pip install tensorboard
-pip install gym
-pip install gym[atari]
-pip install opencv-python
-pip install stable baselines
-```
+## Features
+
+    - Minor changes to improve performance
+    - Minor changes to mirror OpenAI baselines ppo2 implementation
+    - Configs necessary to run experiments on mujoco and atari environments with default OpenAI baselines parameters

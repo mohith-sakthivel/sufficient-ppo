@@ -22,7 +22,7 @@ from stable_baselines3.common.type_aliases import Schedule
 from stable_baselines3.common.utils import get_device, is_vectorized_observation
 from stable_baselines3.common.vec_env.obs_dict_wrapper import ObsDictWrapper
 
-from mre.models import MLP
+from ppo.layers import MLP
 
 
 class BaseModel(nn.Module, ABC):
@@ -440,7 +440,7 @@ class ActorCriticPolicy(BaseModel):
         return low + (0.5 * (scaled_action + 1.0) * (high - low))
 
     def _get_constructor_parameters(self) -> Dict[str, Any]:
-        data = super()._get_constructor_parameters()
+        data = super(ActorCriticPolicy, self)._get_constructor_parameters()
 
         data.update(
             dict(
@@ -461,20 +461,26 @@ class ActorCriticPolicy(BaseModel):
         )
         return data
 
-    def forward(self, obs: torch.Tensor, deterministic: bool = False) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    def forward(self, obs: torch.Tensor, deterministic: bool = False,
+                pi: bool = True, vf: bool = True) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
         Forward pass in all the networks (actor and critic)
 
         :param obs: Observation
         :param deterministic: Whether to sample or use deterministic actions
+        :param pi: Return actions and action log prob
+        :param vf: Return value
         :return: action, value and log probability of the action
         """
-        latent_pi, latent_vf = self._get_latent(obs, pi=True, vf=True)
+        latent_pi, latent_vf = self._get_latent(obs, pi=pi, vf=vf)
+        actions = values = log_prob = None
         # Evaluate the values for the given observations
-        values = self.value_net(latent_vf)
-        distribution = self._get_action_dist_from_latent(latent_pi)
-        actions = distribution.get_actions(deterministic=deterministic)
-        log_prob = distribution.log_prob(actions)
+        if vf:
+            values = self.value_net(latent_vf)
+        if pi:
+            distribution = self._get_action_dist_from_latent(latent_pi)
+            actions = distribution.get_actions(deterministic=deterministic)
+            log_prob = distribution.log_prob(actions)
         return actions, values, log_prob
 
     def _get_action_dist_from_latent(self, latent_pi: torch.Tensor) -> Distribution:
